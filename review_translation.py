@@ -15,19 +15,9 @@ Claudeのvision機能で自動的に転写(OCR)してから比較します。
 
 日本語⇔英語のどちらの方向でも使用できます(自動判定)。
 
-必要ライブラリ:
-    pip install anthropic pdfplumber pypdf python-docx python-dotenv
-
-APIキー設定(.env ファイル):
-    ANTHROPIC_API_KEY=sk-ant-...
-
 使い方:
     1. 下の「★★★ 設定 ★★★」ブロックを編集
     2. 実行: python review_translation.py
-
-注意:
-    Opusは高精度ですが料金も高めです(Sonnetの数倍)。
-    コストを抑えたい場合は DEFAULT_MODEL を claude-sonnet-4-6 に変更してください。
 """
 
 import base64
