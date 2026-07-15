@@ -1,0 +1,63 @@
+SERVICE AGREEMENT
+
+This Service Agreement (this "Agreement") is made and entered into as of July 14, 2026, by and between Sample Trading Co., Ltd. ("Party A") and TestData LLC ("Party B"), with respect to the data analysis services entrusted by Party A to Party B, under the following terms and conditions.
+
+Article 1 (Purpose)
+Party A hereby entrusts Party B with the services set forth in Article 2 (the "Services"), and Party B hereby accepts such entrustment.
+
+Article 2 (Scope of Services)
+The Services shall consist of the following:
+(1) Aggregation and analysis of Party A's sales data;
+(2) Preparation of monthly reports based on the results of such analysis; and
+(3) Any and all services incidental to the foregoing.
+
+Article 3 (Service Fee and Payment)
+1. Party A shall pay Party B a monthly fee of JPY 300,000 (exclusive of consumption tax) as consideration for the Services.
+2. Party A shall pay the fee for each month by the end of the following month by wire transfer to the bank account designated by Party B. The wire transfer fee shall be borne by Party A.
+
+Article 4 (Prohibition of Subcontracting)
+Party B shall not subcontract all or any part of the Services to any third party without the prior written consent of Party A.
+
+Article 5 (Confidentiality)
+1. Neither party shall disclose or divulge to any third party any technical, business, or other confidential information of the other party obtained in connection with the performance of this Agreement, without the prior written consent of the other party.
+2. The obligation set forth in the preceding paragraph shall survive for three (3) years after the termination of this Agreement.
+
+Article 6 (Handling of Personal Information)
+Party B shall handle any personal information provided by Party A in the course of performing the Services appropriately and in compliance with the Act on the Protection of Personal Information and other applicable laws and regulations, and shall not use such information for any purpose other than the performance of the Services.
+
+Article 7 (Intellectual Property Rights)
+All copyrights (including the rights set forth in Articles 27 and 28 of the Copyright Act of Japan) and all other intellectual property rights in and to the deliverables created in the course of performing the Services shall be transferred from Party B to Party A upon full payment of the service fees.
+
+Article 8 (Damages)
+If either party breaches this Agreement and causes damage to the other party, the breaching party shall be liable to compensate the other party for such damage (including reasonable attorneys' fees).
+
+Article 9 (Term)
+The term of this Agreement shall be one (1) year from August 1, 2026 to July 31, 2027; provided, however, that unless either party gives written notice to the contrary at least one (1) month prior to the expiration of the term, this Agreement shall be renewed for successive one-year periods on the same terms and conditions.
+
+Article 10 (Termination)
+Either party may terminate all or part of this Agreement immediately without any notice or demand if the other party falls under any of the following items:
+(1) The other party breaches any provision of this Agreement and fails to cure such breach despite a demand specifying a reasonable period for cure;
+(2) The other party suspends payments or becomes insolvent, or a petition is filed for the commencement of bankruptcy proceedings, civil rehabilitation proceedings, or any other similar proceedings; or
+(3) Any other material event occurs that makes it difficult to continue this Agreement.
+
+Article 11 (Exclusion of Anti-Social Forces)
+Each party represents that neither it nor any of its officers falls under the category of an organized crime group, a member of an organized crime group, or any other person equivalent thereto (collectively, "Anti-Social Forces"), and covenants that it will not fall under such category in the future.
+
+Article 12 (Consultation)
+Any matter not provided for in this Agreement, or any doubt arising in connection with the interpretation of this Agreement, shall be resolved through consultation between the parties in good faith.
+
+Article 13 (Governing Law and Jurisdiction)
+1. This Agreement shall be governed by and construed in accordance with the laws of Japan.
+2. The Tokyo District Court shall have exclusive jurisdiction as the court of first instance over any and all disputes arising in connection with this Agreement.
+
+IN WITNESS WHEREOF, the parties have caused this Agreement to be executed in duplicate, and each party shall retain one original.
+
+July 14, 2026
+
+Party A: 1-1-1 Marunouchi, Chiyoda-ku, Tokyo
+         Sample Trading Co., Ltd.
+         Taro Yamada, Representative Director
+
+Party B: 2-2-2 Hakata-ekimae, Hakata-ku, Fukuoka City, Fukuoka
+         TestData LLC
+         Hanako Sato, Representative Member

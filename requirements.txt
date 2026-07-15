@@ -1,0 +1,11 @@
+# ai-contract-translator 依存ライブラリ
+# インストール: uv pip install -r requirements.txt
+# (pyproject.toml管理にする場合: uv add -r requirements.txt)
+# Python 3.13 対応確認済み(2026-07)
+
+anthropic>=0.116.0        # Claude API クライアント(翻訳・OCR)
+pdfplumber>=0.11.10       # PDFテキスト抽出・ページ数取得
+pypdf>=6.14.2             # PDFのページ分割(OCR版のバッチ処理用)
+python-docx>=1.2.0        # Word (.docx) の読み書き
+reportlab>=5.0.0          # PDF生成(日本語CIDフォント対応)
+python-dotenv>=1.2.2      # .env からのAPIキー読み込み
