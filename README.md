@@ -11,9 +11,11 @@ PDF / Word (.docx) / テキスト (.txt) を読み込み、翻訳結果を PDF /
 | `translate_ja2en.py` | 日本語 → 英語 | PDF / .docx / .txt |
 | `translate_ocr_en2ja.py` | 英語 → 日本語(OCR) | PDF のみ(スキャン画像PDF対応) |
 | `translate_ocr_ja2en.py` | 日本語 → 英語(OCR) | PDF のみ(スキャン画像PDF対応) |
+| `review_translation.py` | 翻訳品質チェック(誤訳・翻訳漏れ検出) | PDF / .docx / .txt |
 
 `translate_en2ja.py` / `translate_ja2en.py` はテキスト抽出可能なファイル向けです。
 `translate_ocr_*.py` はPDFをそのままClaudeのvision機能に送信し、テキスト層のないスキャン画像PDFでも読み取り+翻訳を1回のAPI呼び出しで行います(ページ数・容量に応じて自動でバッチ分割)。
+`review_translation.py` は原文と翻訳文を比較し、誤訳・翻訳漏れ・数値不一致などをレポート(Markdown)として出力します。スキャン画像PDFは自動でvision転写してから比較します。
 
 ## セットアップ
 
@@ -39,6 +41,8 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 ## 使い方
 
+### 翻訳(`translate_*.py`)
+
 1. 使いたいスクリプトを開き、先頭の「★★★ 設定 ★★★」ブロックにある `INPUT_FILE` と `OUTPUT_DIR` を書き換える。
 
    ```python
@@ -57,6 +61,25 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 3. `output/` (デフォルト) に `{元ファイル名}_JA.{txt,docx,pdf}` のような形式で結果が出力されます。
 
+### 翻訳品質チェック(`review_translation.py`)
+
+1. 先頭の「★★★ 設定 ★★★」ブロックにある `SOURCE_FILE`(原文)・`TRANSLATED_FILE`(翻訳文)・`OUTPUT_DIR` を書き換える。
+
+   ```python
+   SOURCE_FILE     = "samples/sample_contract_ja_scan.pdf"   # 原文ファイル
+   TRANSLATED_FILE = "output/sample_contract_ja_scan_EN.pdf" # 翻訳後ファイル
+   OUTPUT_DIR      = "output"                                # レポートの出力先
+   ```
+
+2. 実行する。
+
+   ```bash
+   python review_translation.py
+   ```
+
+3. 条番号・数値の不一致を検出する機械チェックと、Claude Opusによる誤訳・翻訳漏れ・用語不統一などのAIレビューを行い、`output/{翻訳ファイル名}_review.md` にレポートを出力します。
+   - コストを抑えたい場合はスクリプト内の `DEFAULT_MODEL` を `claude-sonnet-5` などに変更してください。
+
 ## ディレクトリ構成
 
 ```
@@ -65,6 +88,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 ├── translate_ja2en.py       # 日→英翻訳(テキスト抽出版)
 ├── translate_ocr_en2ja.py   # 英→日翻訳(OCR/vision版、PDF専用)
 ├── translate_ocr_ja2en.py   # 日→英翻訳(OCR/vision版、PDF専用)
+├── review_translation.py    # 翻訳品質チェック(誤訳・翻訳漏れ検出)
 ├── samples/                 # サンプル契約書(入力例)
 ├── output/                  # 翻訳結果の出力先(自動生成)
 ├── requirements.txt
