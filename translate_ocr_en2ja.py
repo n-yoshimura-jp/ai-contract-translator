@@ -58,25 +58,36 @@ OUTPUT_SUFFIX = "_JA"
 HEADING_PATTERN = re.compile(r"^第[0-9０-９一二三四五六七八九十百]+条")
 
 SYSTEM_PROMPT = (
-    "You are a professional legal translator specializing in "
-    "English-to-Japanese translation of contracts. You are also "
-    "highly skilled at reading scanned documents accurately."
+    "You are a professional translator specializing in English-to-Japanese "
+    "translation across all document types (legal contracts, business, "
+    "technical, academic, casual, marketing). You are also highly skilled "
+    "at reading scanned documents accurately."
 )
 
 USER_PROMPT = (
-    "The attached PDF contains an English contract. It may be a "
+    "The attached PDF contains English-language text. It may be a "
     "scanned image without a text layer.\n\n"
     "Step 1: Read ALL English text in the PDF accurately, including "
-    "headings, numbered clauses, tables, dates, names, and addresses.\n"
-    "Step 2: Translate everything into precise, formal Japanese legal "
-    "language (法律文書の文体). Use 「〜するものとする」 for \"shall\" and "
-    "「〜してはならない」 for \"shall not\".\n\n"
+    "headings, numbered items, tables, dates, names, and addresses.\n"
+    "Step 2: Identify the document's genre and register (legal/contract, "
+    "business, technical, academic, casual, etc.) and translate everything "
+    "into the Japanese style native speakers would expect for that genre. "
+    "For legal/contract documents, use precise, formal Japanese legal "
+    "language (法律文書の文体) — 「〜するものとする」 for \"shall\", "
+    "「〜してはならない」 for \"shall not\". For other documents, use natural, "
+    "idiomatic Japanese suited to the register.\n\n"
     "Rules:\n"
     "- Preserve the document structure exactly "
-    "(Article 1 → 第1条, clause numbering, paragraph breaks).\n"
-    "- Use standard terminology (Party A → 甲, Party B → 乙, "
-    "this Agreement → 本契約, damages → 損害賠償, governing law → 準拠法).\n"
-    "- Do NOT summarize, omit, or add anything.\n"
+    "(e.g. Article 1 → 第1条 for legal documents; headings, numbered lists, "
+    "and paragraph breaks for all documents).\n"
+    "- Use standard terminology for the domain (contracts: Party A → 甲, "
+    "Party B → 乙, this Agreement → 本契約, damages → 損害賠償, "
+    "governing law → 準拠法; keep technical/domain terms consistent "
+    "throughout).\n"
+    "- Translate EVERYTHING faithfully and completely — every sentence, "
+    "heading, list item, table cell, footnote, caption, and label. Do NOT "
+    "summarize, omit, or add anything. Omissions (翻訳漏れ) are the most "
+    "serious possible error and must never happen.\n"
     "- If a page starts or ends mid-sentence, translate it as-is.\n"
     "- If any part is illegible, write [判読不能] at that position.\n"
     "- Output ONLY the Japanese translation. No preamble, no commentary."
@@ -156,7 +167,12 @@ def ocr_translate_batch(
                     ],
                 }],
             ) as stream:
-                return stream.get_final_text().strip()
+                text = stream.get_final_text()
+                if stream.get_final_message().stop_reason == "max_tokens":
+                    print("  [警告] 出力が max_tokens に達しました。"
+                          "訳文が途中で切れている可能性があります"
+                          "(PAGES_PER_BATCH を小さくしてください)。")
+                return text.strip()
         except anthropic.AuthenticationError:
             sys.exit(
                 "エラー: APIキーが無効です(401)。"
@@ -298,8 +314,8 @@ def main() -> None:
     print(f"読み込み中: {input_path}")
     translated = ocr_translate_pdf(input_path, DEFAULT_MODEL)
 
-    # 3. 出力
-    stem = input_path.stem + OUTPUT_SUFFIX
+    # 3. 出力(実行時刻を先頭に付けて、上書きせず時系列に並ぶようにする)
+    stem = f"{time.strftime('%Y%m%d_%H%M%S')}_{input_path.stem}{OUTPUT_SUFFIX}"
     outputs = {
         "テキスト": output_dir / f"{stem}.txt",
         "Word":     output_dir / f"{stem}.docx",

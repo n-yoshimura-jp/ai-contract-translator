@@ -53,22 +53,36 @@ MAX_CHARS_PER_CHUNK = 8000   # 1回のAPI呼び出しで翻訳する最大文字
 MAX_TOKENS_PER_CALL = 16384  # 日本語出力は英語よりトークン数が膨らむため多めに確保
 MAX_RETRIES = 3              # API失敗時のリトライ回数
 
-SYSTEM_PROMPT = """You are a professional legal translator specializing in \
-English-to-Japanese translation of contracts and legal documents.
+SYSTEM_PROMPT = """You are a professional translator specializing in \
+English-to-Japanese translation, with expertise across legal contracts, \
+business correspondence, technical manuals, academic papers, marketing \
+copy, news articles, and general-purpose writing.
 
 Rules:
-1. Translate the English contract text into precise, formal Japanese legal \
+1. First identify the document's genre and register (legal/contract, \
+business, technical, academic, casual, marketing, etc.) from its content \
+and tone, and translate into the Japanese style native speakers would \
+expect for that genre.
+2. For legal or contract documents: use precise, formal Japanese legal \
 language (法律文書の文体). Use standard phrasing such as 「〜するものとする」 \
-for "shall" and 「〜してはならない」 for "shall not".
-2. Preserve the document structure exactly: article numbers (Article 1 → 第1条), \
-section numbering (Section 2.1 → 第2条第1項 or 2.1 as appropriate), \
-paragraph breaks, and indentation.
-3. Use standard Japanese legal terminology (e.g. "Party A" → 甲, \
+for "shall" and 「〜してはならない」 for "shall not". Preserve article/section \
+numbering (Article 1 → 第1条, Section 2.1 → 第2条第1項 or 2.1 as appropriate).
+3. For non-legal documents: use natural, idiomatic Japanese appropriate to \
+the register (formal business Japanese for business documents, plain but \
+precise Japanese for technical/academic text, natural conversational \
+Japanese for casual text), while preserving headings, numbered lists, and \
+paragraph structure exactly.
+4. Use standard terminology for the domain (e.g. contracts: "Party A" → 甲, \
 "Party B" → 乙, "this Agreement" → 本契約, "damages" → 損害賠償, \
-"confidential information" → 秘密情報, "governing law" → 準拠法).
-4. Do NOT summarize, omit, or add anything. Translate everything faithfully.
-5. Output ONLY the translated text. No preamble, no commentary, no code fences.
-6. If a segment starts or ends mid-sentence, translate it as-is without \
+"confidential information" → 秘密情報, "governing law" → 準拠法) and keep any \
+domain-specific or technical terms consistent throughout the document.
+5. Translate EVERYTHING faithfully and completely — every sentence, \
+heading, list item, table cell, footnote, caption, and label. Do NOT \
+summarize, paraphrase away detail, omit, or add anything. Omissions \
+(翻訳漏れ) are the most serious possible error and must never happen, even \
+for short or repetitive-looking segments.
+6. Output ONLY the translated text. No preamble, no commentary, no code fences.
+7. If a segment starts or ends mid-sentence, translate it as-is without \
 completing the sentence yourself."""
 
 
@@ -82,19 +96,35 @@ def read_pdf(path: Path) -> str:
         for page in pdf.pages:
             text = page.extract_text() or ""
             pages.append(text)
-    full_text = "\n\n".join(pages).strip()
-    if not full_text:
+
+    # テキストが取れなかったページ(スキャン画像ページ)を検出する。
+    # 見逃すとそのページが丸ごと翻訳漏れになるため、必ず知らせる。
+    blank = [i for i, t in enumerate(pages, 1) if not t.strip()]
+    if len(blank) == len(pages):
         raise ValueError(
-            "PDFからテキストを抽出できませんでした。"
-            "スキャン画像のPDFの場合はOCR(例: pytesseract)が必要です。"
+            "PDFからテキストを抽出できませんでした(全ページが画像)。\n"
+            "  スキャン画像のPDFは translate_ocr_en2ja.py を使用してください。"
         )
-    return full_text
+    if blank:
+        pages_str = ", ".join(str(p) for p in blank)
+        raise ValueError(
+            f"このPDFは一部のページが画像です(テキストを抽出できないページ: "
+            f"{pages_str} / 全{len(pages)}ページ)。\n"
+            "  このまま翻訳すると該当ページが翻訳漏れになります。\n"
+            "  translate_ocr_en2ja.py を使用してください。"
+        )
+    return "\n\n".join(pages).strip()
 
 
 def read_docx(path: Path) -> str:
     from docx import Document
     doc = Document(str(path))
     parts = []
+
+    # ヘッダー(本文より前に置く)
+    for section in doc.sections:
+        parts.extend(_docx_container_text(section.header))
+
     for para in doc.paragraphs:
         parts.append(para.text)
     # 表(テーブル)内のテキストも取得
@@ -102,7 +132,37 @@ def read_docx(path: Path) -> str:
         for row in table.rows:
             cells = [cell.text.strip() for cell in row.cells]
             parts.append(" | ".join(cells))
+
+    # テキストボックス内の文字は doc.paragraphs に含まれないため個別に取得
+    parts.extend(_docx_textbox_text(doc))
+
+    # フッター(本文より後に置く)
+    for section in doc.sections:
+        parts.extend(_docx_container_text(section.footer))
+
     return "\n".join(parts).strip()
+
+
+def _docx_container_text(container) -> list[str]:
+    """ヘッダー/フッターの段落と表からテキストを取り出す。"""
+    parts = [p.text for p in container.paragraphs]
+    for table in container.tables:
+        for row in table.rows:
+            parts.append(" | ".join(c.text.strip() for c in row.cells))
+    return [p for p in parts if p.strip()]
+
+
+def _docx_textbox_text(doc) -> list[str]:
+    """テキストボックス(図形)内の文字を取り出す。"""
+    from docx.oxml.ns import qn
+
+    parts = []
+    for txbx in doc.element.body.iter(qn("w:txbxContent")):
+        for para in txbx.iter(qn("w:p")):
+            text = "".join(node.text or "" for node in para.iter(qn("w:t")))
+            if text.strip():
+                parts.append(text)
+    return parts
 
 
 def read_txt(path: Path) -> str:
@@ -156,9 +216,51 @@ def print_char_stats(text: str) -> None:
 # ---------------------------------------------------------------------------
 # 3. 翻訳(Anthropic API)
 # ---------------------------------------------------------------------------
+# 文末の区切り(句点・ピリオド等と後続の空白)。1文字も失わないよう括弧で捕捉する
+SENTENCE_END = re.compile(r"([。．.!?！?]+\s*)")
+
+
+def split_long_paragraph(para: str, max_chars: int) -> list[str]:
+    """改行のない長大な段落を、文の区切りを優先して分割する。
+
+    連結すると元の段落に完全に復元できること(文字を失わないこと)を保証する。
+    """
+    # 区切り文字も残して分割し、「本文+区切り」を1文として組み立て直す
+    tokens = SENTENCE_END.split(para)
+    units = []
+    for i in range(0, len(tokens), 2):
+        unit = tokens[i] + (tokens[i + 1] if i + 1 < len(tokens) else "")
+        if unit:
+            units.append(unit)
+
+    pieces, current = [], ""
+    for unit in units:
+        if len(unit) > max_chars and current:
+            pieces.append(current)
+            current = ""
+        while len(unit) > max_chars:      # 1文だけで上限を超える場合は文字数で切る
+            pieces.append(unit[:max_chars])
+            unit = unit[max_chars:]
+        if current and len(current) + len(unit) > max_chars:
+            pieces.append(current)
+            current = ""
+        current += unit
+    if current:
+        pieces.append(current)
+    return pieces or [para]
+
+
 def split_into_chunks(text: str, max_chars: int = MAX_CHARS_PER_CHUNK) -> list[str]:
     """段落境界を保ちながらテキストを分割する(長文契約書対応)。"""
-    paragraphs = text.split("\n")
+    paragraphs = []
+    for para in text.split("\n"):
+        # 改行のない長文(1段落が上限超え)はそのままだと訳文が途中で切れるため、
+        # 文の区切りを優先して先に分割しておく
+        if len(para) > max_chars:
+            paragraphs.extend(split_long_paragraph(para, max_chars))
+        else:
+            paragraphs.append(para)
+
     chunks, current, current_len = [], [], 0
     for para in paragraphs:
         para_len = len(para) + 1
@@ -172,6 +274,16 @@ def split_into_chunks(text: str, max_chars: int = MAX_CHARS_PER_CHUNK) -> list[s
     return chunks
 
 
+def extract_text(response) -> str:
+    """レスポンスからテキストブロックだけを取り出す。
+
+    Claude 4.6 以降のモデルは thinking ブロックを返すことがあり、
+    content[0] がテキストとは限らないため type で絞り込む。
+    """
+    return "".join(block.text for block in response.content
+                   if block.type == "text")
+
+
 def translate_chunk(client: anthropic.Anthropic, chunk: str, model: str) -> str:
     last_error = None
     for attempt in range(1, MAX_RETRIES + 1):
@@ -179,16 +291,23 @@ def translate_chunk(client: anthropic.Anthropic, chunk: str, model: str) -> str:
             response = client.messages.create(
                 model=model,
                 max_tokens=MAX_TOKENS_PER_CALL,
+                # 翻訳は推論より忠実さが重要。thinking を切って
+                # max_tokens を全て訳文に使う(切れによる翻訳漏れを防ぐ)
+                thinking={"type": "disabled"},
                 system=SYSTEM_PROMPT,
                 messages=[{
                     "role": "user",
                     "content": (
-                        "Translate the following English contract text "
+                        "Translate the following English text "
                         "into Japanese:\n\n" + chunk
                     ),
                 }],
             )
-            return response.content[0].text.strip()
+            if response.stop_reason == "max_tokens":
+                print("  [警告] 出力が max_tokens に達しました。"
+                      "訳文が途中で切れている可能性があります"
+                      "(MAX_CHARS_PER_CHUNK を小さくしてください)。")
+            return extract_text(response).strip()
         except anthropic.AuthenticationError:
             sys.exit(
                 "エラー: APIキーが無効です(401)。"
@@ -330,8 +449,8 @@ def main() -> None:
     # 2. 翻訳
     translated = translate_text(source_text, DEFAULT_MODEL)
 
-    # 3. 出力
-    stem = input_path.stem + "_JA"
+    # 3. 出力(実行時刻を先頭に付けて、上書きせず時系列に並ぶようにする)
+    stem = f"{time.strftime('%Y%m%d_%H%M%S')}_{input_path.stem}_JA"
     outputs = {
         "テキスト": output_dir / f"{stem}.txt",
         "Word":     output_dir / f"{stem}.docx",

@@ -8,12 +8,54 @@ wheels/
 
 # Virtual environments
 .venv
+venv/
+env/
+ENV/
 
-# Environment variables
+# Environment variables(APIキー)
+# .env だけでなく .env.local / .env.bak などの派生も必ず除外する
 .env
+.env.*
+!.env.example
 
-# macOS
+# ツールのキャッシュ
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.coverage
+htmlcov/
+
+# エディタ・ローカル設定
+.vscode/
+.idea/
+.claude/
+*.swp
+*~
+
+# OS
 .DS_Store
+Thumbs.db
+desktop.ini
 
-# 生成物(翻訳結果)
+# ===========================================================================
+# 機密文書(重要)
+# このツールは実在の契約書を扱うため、翻訳対象と生成物は必ず除外する
+# ===========================================================================
+# 生成物(翻訳結果・レビューレポート)
 output/
+
+# 翻訳したい実ファイルの置き場所。ここに入れればコミットされない
+input/
+
+# 念のため、リポジトリ直下に置かれた文書ファイルも除外する
+# (samples/ 配下のサンプルは明示的に除外解除)
+/*.pdf
+/*.docx
+/*.doc
+/*.txt
+!requirements.txt
+!/samples/**
+
+# ログ
+*.log

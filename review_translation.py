@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 翻訳品質チェックツール(誤訳・翻訳漏れの検出)
 =====================================================================
@@ -27,6 +26,7 @@ import os
 import re
 import sys
 import time
+import unicodedata
 from collections import Counter
 from pathlib import Path
 
@@ -38,49 +38,113 @@ load_dotenv()
 # ===========================================================================
 # ★★★ 設定(ここを編集してください)★★★
 # ===========================================================================
-SOURCE_FILE     = "samples/sample_contract_ja_scan.pdf"   # 原文ファイル
-TRANSLATED_FILE = "output/sample_contract_ja_scan_EN.pdf" # 翻訳後ファイル
+SOURCE_FILE     = "samples/sample_contract_ja.pdf"   # 原文ファイル
+TRANSLATED_FILE = "output/20260803_235042_sample_contract_ja_EN.pdf" # 翻訳後ファイル
 OUTPUT_DIR      = "output"                           # レポートの出力先
+
+# レビューに使うモデル(重要な契約書は claude-opus-5 に切り替えてください)
+#   claude-sonnet-5 … 通常用。重大な誤訳・翻訳漏れ・数値誤り・無断追加は
+#                     十分に検出できる。料金は Opus の約 1/2.5、速度は同等
+#   claude-opus-5   … 重要契約の最終確認用。1語だけの訳し漏れなど軽微な
+#                     欠陥まで検出し、実行ごとの結果のブレも小さい
+DEFAULT_MODEL = "claude-sonnet-5"
 # ===========================================================================
 
 # ---------------------------------------------------------------------------
 # 内部設定
 # ---------------------------------------------------------------------------
-DEFAULT_MODEL = "claude-opus-4-8"   # 高精度レビュー用(Opus)
 TRANSCRIBE_MODEL = "claude-sonnet-5"  # スキャンPDFの転写(OCR)用(コスト重視)
 TRANSCRIBE_PAGES_PER_BATCH = 10     # 転写時に1回で処理するページ数
-MAX_TOKENS_PER_CALL = 16384
+MAX_TOKENS_PER_CALL = 32000  # Opus 5はデフォルトでthinkingが有効になり同じ予算を消費するため増量
 MAX_RETRIES = 3
 MAX_TOTAL_CHARS = 150_000  # 原文+翻訳文の合計がこれを超える場合は警告
 
-SYSTEM_PROMPT = """You are a senior bilingual legal reviewer specializing in \
-Japanese-English contract translation quality assurance. You are meticulous \
-and never miss omissions or mistranslations."""
+SYSTEM_PROMPT = """You are a senior bilingual reviewer specializing in \
+Japanese-English translation quality assurance across all document types \
+(legal contracts, business correspondence, technical manuals, academic \
+papers, casual writing).
 
-REVIEW_PROMPT = """Below are a source contract and its translation \
+Your particular strength is catching defects that survive a casual read: a \
+single dropped qualifier, one missing item in an enumeration, a reversed \
+direction of obligation, a boilerplate phrase added by the translator. A \
+sentence whose overall meaning looks right is not evidence that it is \
+correct — you verify it element by element before accepting it."""
+
+REVIEW_PROMPT = """Below are a source document and its translation \
 (Japanese-English or English-Japanese; detect the direction yourself).
 
-Review the translation exhaustively, clause by clause, and identify:
+First identify the document's genre (legal/contract, business, technical, \
+academic, casual, marketing, etc.).
+
+# How to review
+
+Work through the SOURCE sentence by sentence, in order. For each sentence, \
+find its counterpart in the translation and compare them **element by \
+element** — do not stop at "the gist matches". Then do a second pass in the \
+reverse direction, reading the TRANSLATION sentence by sentence, to find \
+text that has no counterpart in the source.
+
+Verify that each of these survived the translation intact:
+
+- **数値・金額・日付・期間・割合** — 桁、単位、通貨、和暦/西暦
+- **固有名詞** — 会社名、氏名、住所、機関名、裁判所名
+- **条・項・号の番号と階層** — 番号の対応と、各条の号の**個数**を数えて突合する
+- **修飾語・限定語** — "prior", "written", "reasonable", "exclusive", \
+"first instance", "material", "sole", "immediately"、「事前の」「書面による」\
+「合理的な」「専属的」「第一審の」「重大な」。修飾語が1語落ちるだけで法的効果が \
+変わるため、1語単位で照合する
+- **並列・列挙の全要素** — "notice or demand"、"A, B, and C" のような並列で \
+片方だけが訳されていないか。並列要素の**個数**を原文と訳文で数えて突合する
+- **義務・権限の強度と方向** — shall / shall not / may / must と「するものと \
+する」「してはならない」「できる」の対応。誰が誰に対して負う義務か、権利が \
+どちらからどちらへ移転するか
+- **否定・条件・例外** — 「〜を除き」「〜がない限り」"unless", "except", \
+"provided, however" の有無と係り先
+- **原文にない追加** — 訳文だけにある語句。その言語の契約慣行として自然な \
+定型表現(例: 記名押印、署名捺印)であっても、原文に対応表現がなければ「追加」\
+として報告する
+
+# What to report
+
 1. 誤訳 (mistranslation): meaning differs from the source
 2. 翻訳漏れ (omission): source content missing from the translation \
-(check EVERY clause, item, date, name, address, and signature block)
+(sentences, items, dates, names, addresses, headings, table cells, \
+footnotes, signature blocks, and **individual words** such as qualifiers)
 3. 不要な追加 (addition): content not present in the source
-4. 数値・日付の不一致 (number/date mismatch): amounts, dates, article numbers, periods
+4. 数値・日付の不一致 (number/date mismatch): amounts, dates, article/section \
+numbers, periods
 5. 用語の不統一 (terminology inconsistency): e.g. 甲/乙 vs Party A/B mapping, \
-defined terms used inconsistently
-6. 法的ニュアンスのずれ (legal nuance): shall/may, 義務/努力義務 の混同など
+defined terms or technical terms used inconsistently
+6. 法的ニュアンスのずれ (legal nuance — only applicable to legal/contract \
+documents): shall/may, 義務/努力義務 の混同など
+7. 文体・トーンのずれ (register/tone mismatch): the translation's register \
+doesn't match the source document's genre (e.g. casual text translated too \
+formally, or vice versa)
+
+# Reporting rules
+
+- **網羅性が最優先。** 重要度で取捨選択してはならない。1語だけの脱落や、 \
+実務上は影響が小さいと思われる差異も、気づいたものはすべて報告する。 \
+「些細なので省く」という判断は禁止する。severity は「重大/中/軽微」で \
+正直に付ければよく、軽微なものを報告しない理由にはならない
+- **ただし存在しない問題を作ってはならない。** 各指摘は原文と訳文の該当箇所を \
+引用して裏付けられること。裏付けられないものは報告しない
+- 以下は問題ではないので報告しない: 表記変換(300,000円 ↔ JPY 300,000、 \
+漢数字、序数、和暦/西暦の正しい換算)、語順の自然な入れ替え、その言語として \
+自然な言い回しの選択
 
 Respond ONLY with a JSON object in this exact format (no code fences, \
 no commentary). Write all descriptions and suggestions in Japanese:
 
 {
+  "document_type": "検出した文書の種類(例: 契約書 / ビジネス文書 / 技術文書 / 学術論文 / カジュアルな文章)",
   "overall_assessment": "全体評価を2〜3文で",
   "quality_score": <0-100の整数>,
   "issues": [
     {
       "severity": "重大" | "中" | "軽微",
-      "type": "誤訳" | "翻訳漏れ" | "追加" | "数値不一致" | "用語不統一" | "法的ニュアンス",
-      "location": "該当箇所(例: 第5条 / Article 5)",
+      "type": "誤訳" | "翻訳漏れ" | "追加" | "数値不一致" | "用語不統一" | "法的ニュアンス" | "文体・トーン",
+      "location": "該当箇所(例: 第5条 / Article 5 / 第2段落)",
       "source_excerpt": "原文の該当部分(短く)",
       "translation_excerpt": "翻訳の該当部分(短く。漏れの場合は空文字)",
       "description": "問題の説明",
@@ -194,7 +258,12 @@ def transcribe_scanned_pdf(path: Path, client: anthropic.Anthropic) -> str:
                         ],
                     }],
                 ) as stream:
-                    parts.append(stream.get_final_text().strip())
+                    text = stream.get_final_text()
+                    if stream.get_final_message().stop_reason == "max_tokens":
+                        print("  [警告] 転写が max_tokens に達しました。"
+                              "途中で切れている可能性があります"
+                              "(TRANSCRIBE_PAGES_PER_BATCH を小さくしてください)。")
+                    parts.append(text.strip())
                 break
             except anthropic.AuthenticationError:
                 sys.exit(
@@ -339,7 +408,12 @@ def ai_review(source: str, translation: str, model: str,
                 system=SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": user_text}],
             ) as stream:
-                return parse_json_response(stream.get_final_text())
+                text = stream.get_final_text()
+                if stream.get_final_message().stop_reason == "max_tokens":
+                    print("  [警告] レビュー結果が max_tokens に達しました。"
+                          "指摘が途中で切れ、JSON解析に失敗する可能性があります"
+                          "(文書を分割してレビューしてください)。")
+                return parse_json_response(text)
         except anthropic.AuthenticationError:
             sys.exit(
                 "エラー: APIキーが無効です(401)。"
@@ -358,62 +432,100 @@ def ai_review(source: str, translation: str, model: str,
 # 4. レポート生成
 # ---------------------------------------------------------------------------
 SEVERITY_ORDER = {"重大": 0, "中": 1, "軽微": 2}
+REPORT_WIDTH = 78   # レポートの折り返し幅(半角換算の桁数)
+
+
+def _width(text: str) -> int:
+    """全角文字を2桁として文字列の表示幅を返す。"""
+    return sum(2 if unicodedata.east_asian_width(c) in "WFA" else 1
+               for c in text)
+
+
+def _wrap(text: str, indent: str = "") -> list[str]:
+    """表示幅で折り返す。日本語は空白がないため文字単位で折る。"""
+    limit = max(20, REPORT_WIDTH - _width(indent))
+    out = []
+    for para in str(text).split("\n"):
+        line, line_w = "", 0
+        for ch in para:
+            ch_w = _width(ch)
+            if line_w + ch_w > limit:
+                # 英単語の途中で切らないよう、近くに空白があればそこで折る
+                cut = line.rfind(" ")
+                if cut > limit // 2:
+                    out.append(indent + line[:cut])
+                    line = line[cut + 1:]
+                else:
+                    out.append(indent + line)
+                    line = ""
+                line_w = _width(line)
+            line += ch
+            line_w += ch_w
+        out.append(indent + line)
+    return out
+
+
+def _field(label: str, value: str, label_w: int = 6) -> list[str]:
+    """「ラベル: 値」を、2行目以降もラベル幅だけ字下げして整形する。"""
+    pad = " " * max(0, label_w - _width(label))
+    head = f"     {label}{pad}: "
+    body = _wrap(value, indent=" " * _width(head))
+    body[0] = head + body[0].lstrip()
+    return body
 
 
 def build_report(source_path: Path, trans_path: Path,
                  mech: list[str], ai: dict, model: str) -> str:
-    lines = []
-    lines.append("# 翻訳品質チェックレポート")
-    lines.append("")
-    lines.append(f"- 原文: `{source_path}`")
-    lines.append(f"- 翻訳: `{trans_path}`")
-    lines.append(f"- レビューモデル: `{model}`")
+    bar_eq = "=" * REPORT_WIDTH
+    bar_dash = "-" * REPORT_WIDTH
+    lines = [bar_eq, " 翻訳品質チェックレポート", bar_eq]
+    lines.append(f" 原文          : {source_path}")
+    lines.append(f" 翻訳          : {trans_path}")
+    lines.append(f" レビューモデル: {model}")
     lines.append("")
 
-    lines.append("## 1. 機械チェック(条番号・数値・分量)")
-    lines.append("")
+    lines += [bar_dash, " 1. 機械チェック(条番号・数値・分量)", bar_dash]
     for f in mech:
-        lines.append(f"- {f}")
+        lines += _wrap(f, indent="  ")
     lines.append("")
 
-    lines.append("## 2. AIレビュー(誤訳・翻訳漏れ・用語)")
-    lines.append("")
+    lines += [bar_dash, " 2. AIレビュー(誤訳・翻訳漏れ・用語)", bar_dash]
+    doc_type = ai.get("document_type")
+    if doc_type:
+        lines.append(f" 検出した文書の種類: {doc_type}")
     score = ai.get("quality_score")
     if score is not None:
-        lines.append(f"**品質スコア: {score} / 100**")
-        lines.append("")
-    lines.append(f"**総評:** {ai.get('overall_assessment', '')}")
-    lines.append("")
+        lines.append(f" 品質スコア        : {score} / 100")
 
     issues = sorted(ai.get("issues", []),
                     key=lambda x: SEVERITY_ORDER.get(x.get("severity"), 9))
+    counts = Counter(i.get("severity", "?") for i in issues)
+    lines.append(f" 指摘件数          : {len(issues)} 件"
+                 f"(重大 {counts.get('重大', 0)} / 中 {counts.get('中', 0)} / "
+                 f"軽微 {counts.get('軽微', 0)})")
+    lines.append("")
+    lines += _wrap(f"総評: {ai.get('overall_assessment', '')}", indent=" ")
+    lines.append("")
+
     if not issues:
-        lines.append("指摘事項はありませんでした。")
+        lines.append(" 指摘事項はありませんでした。")
     else:
-        counts = Counter(i.get("severity", "?") for i in issues)
-        lines.append(f"指摘件数: {len(issues)} 件"
-                     f"(重大 {counts.get('重大', 0)} / 中 {counts.get('中', 0)} / "
-                     f"軽微 {counts.get('軽微', 0)})")
-        lines.append("")
         for n, issue in enumerate(issues, 1):
-            lines.append(f"### {n}. [{issue.get('severity', '?')}] "
-                         f"{issue.get('type', '?')} — {issue.get('location', '')}")
-            lines.append("")
+            lines.append(f" [{n}] {issue.get('severity', '?')} / "
+                         f"{issue.get('type', '?')} / "
+                         f"{issue.get('location', '')}")
             if issue.get("source_excerpt"):
-                lines.append(f"- 原文: {issue['source_excerpt']}")
+                lines += _field("原文", issue["source_excerpt"])
             if issue.get("translation_excerpt"):
-                lines.append(f"- 翻訳: {issue['translation_excerpt']}")
-            lines.append(f"- 問題点: {issue.get('description', '')}")
+                lines += _field("翻訳", issue["translation_excerpt"])
+            lines += _field("問題点", issue.get("description", ""))
             if issue.get("suggestion"):
-                lines.append(f"- 修正案: {issue['suggestion']}")
+                lines += _field("修正案", issue["suggestion"])
             lines.append("")
 
     if "raw" in ai:
-        lines.append("## (参考)AIの生レスポンス")
-        lines.append("")
-        lines.append("```")
+        lines += ["", bar_dash, " (参考)AIの生レスポンス", bar_dash]
         lines.append(ai["raw"])
-        lines.append("```")
 
     return "\n".join(lines) + "\n"
 
@@ -459,7 +571,11 @@ def main() -> None:
                    client=client_holder.get("client"))
 
     report = build_report(source_path, trans_path, mech, ai, DEFAULT_MODEL)
-    report_path = output_dir / f"{trans_path.stem}_review.md"
+    # 実行時刻を先頭に付けて、上書きせず時系列に並ぶようにする
+    # 翻訳ファイル側の日時プレフィックスは重複するので取り除く
+    base = re.sub(r"^\d{8}_\d{6}_", "", trans_path.stem)
+    stem = f"{time.strftime('%Y%m%d_%H%M%S')}_{base}_review"
+    report_path = output_dir / f"{stem}.txt"
     report_path.write_text(report, encoding="utf-8")
 
     issues = ai.get("issues", [])

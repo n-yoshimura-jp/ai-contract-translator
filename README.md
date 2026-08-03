@@ -59,7 +59,8 @@ ANTHROPIC_API_KEY=sk-ant-...
    python translate_en2ja.py
    ```
 
-3. `output/` (デフォルト) に `{元ファイル名}_JA.{txt,docx,pdf}` のような形式で結果が出力されます。
+3. `output/` (デフォルト) に `{実行日時}_{元ファイル名}_JA.{txt,docx,pdf}` のような形式で結果が出力されます。
+   - 先頭の実行日時は `20260803_214608` (YYYYMMDD_HHMMSS) 形式です。実行のたびに新しいファイルが作られ、過去の結果を上書きしません。
 
 ### 翻訳品質チェック(`review_translation.py`)
 
@@ -77,7 +78,7 @@ ANTHROPIC_API_KEY=sk-ant-...
    python review_translation.py
    ```
 
-3. 条番号・数値の不一致を検出する機械チェックと、Claude Opusによる誤訳・翻訳漏れ・用語不統一などのAIレビューを行い、`output/{翻訳ファイル名}_review.md` にレポートを出力します。
+3. 条番号・数値の不一致を検出する機械チェックと、Claude Opusによる誤訳・翻訳漏れ・用語不統一などのAIレビューを行い、`output/{実行日時}_{翻訳ファイル名}_review.txt` にレポートを出力します。
    - コストを抑えたい場合はスクリプト内の `DEFAULT_MODEL` を `claude-sonnet-5` などに変更してください。
 
 ## ディレクトリ構成
@@ -89,11 +90,22 @@ ANTHROPIC_API_KEY=sk-ant-...
 ├── translate_ocr_en2ja.py   # 英→日翻訳(OCR/vision版、PDF専用)
 ├── translate_ocr_ja2en.py   # 日→英翻訳(OCR/vision版、PDF専用)
 ├── review_translation.py    # 翻訳品質チェック(誤訳・翻訳漏れ検出)
-├── samples/                 # サンプル契約書(入力例)
-├── output/                  # 翻訳結果の出力先(自動生成)
+├── samples/                 # サンプル契約書(入力例。架空の内容)
+├── input/                   # 実案件の原本置き場(gitignore済み。要作成)
+├── output/                  # 翻訳結果の出力先(自動生成。gitignore済み)
 ├── requirements.txt
 └── pyproject.toml
 ```
+
+### 実案件のファイルの扱い
+
+実在の契約書を翻訳する場合は、`input/` を作成してそこに置いてください。`input/` と `output/` は `.gitignore` 済みのため、誤って GitHub にコミットされません。
+
+```python
+INPUT_FILE = "input/秘密保持契約書.pdf"
+```
+
+リポジトリ直下に置いた `*.pdf` / `*.docx` / `*.txt` も `.gitignore` で除外していますが、機密文書は `input/` に集約することを推奨します。
 
 ## 注意事項
 
