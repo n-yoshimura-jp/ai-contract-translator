@@ -48,7 +48,7 @@ OUTPUT_DIR = "output"      # 出力先ディレクトリ(無ければ自動作�
 # ---------------------------------------------------------------------------
 # 内部設定
 # ---------------------------------------------------------------------------
-DEFAULT_MODEL = "claude-sonnet-5"
+DEFAULT_MODEL = "claude-sonnet-5-5"
 PAGES_PER_BATCH = 5          # 1回のAPI呼び出しで処理するページ数
 MAX_TOKENS_PER_CALL = 32000  # 翻訳出力用のトークン上限
 MAX_RETRIES = 3
@@ -88,7 +88,8 @@ USER_PROMPT = (
     "serious possible error and must never happen.\n"
     "- If a page starts or ends mid-sentence, translate it as-is.\n"
     "- If any part is illegible, write [illegible] at that position.\n"
-    "- Output ONLY the English translation. No preamble, no commentary."
+    "- Output ONLY the English translation as plain text. No preamble, no "
+    "commentary, no Markdown formatting (such as ** or #)."
 )
 
 
@@ -149,6 +150,13 @@ def ocr_translate_batch(
             with client.messages.stream(
                 model=model,
                 max_tokens=MAX_TOKENS_PER_CALL,
+                # 読み取り+翻訳に thinking は不要。thinking を切って
+                # max_tokens を全て訳文に使う(トークン節約・切れ防止)
+                # ("between_tools" は Sonnet 5.5 専用。モデルを変えたら削除する)
+                thinking={"type": "between_tools"},
+                # 実測(2026-09): high と medium で出力トークンにほぼ差がないため、
+                # 確実性を優先して high を使う(between_tools で使える上限)
+                output_config={"effort": "high"},
                 system=SYSTEM_PROMPT,
                 messages=[{
                     "role": "user",
@@ -166,7 +174,12 @@ def ocr_translate_batch(
                 }],
             ) as stream:
                 text = stream.get_final_text()
-                if stream.get_final_message().stop_reason == "max_tokens":
+                final = stream.get_final_message()
+                if final.stop_reason == "refusal":
+                    # 拒否された場合は訳文が空になるため、黙って続行せず停止する
+                    raise RuntimeError(
+                        f"モデルが翻訳を拒否しました: {final.stop_details}")
+                if final.stop_reason == "max_tokens":
                     print("  [警告] 出力が max_tokens に達しました。"
                           "訳文が途中で切れている可能性があります"
                           "(PAGES_PER_BATCH を小さくしてください)。")

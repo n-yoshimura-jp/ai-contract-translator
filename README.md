@@ -15,7 +15,9 @@ PDF / Word (.docx) / テキスト (.txt) を読み込み、翻訳結果を PDF /
 
 `translate_en2ja.py` / `translate_ja2en.py` はテキスト抽出可能なファイル向けです。
 `translate_ocr_*.py` はPDFをそのままClaudeのvision機能に送信し、テキスト層のないスキャン画像PDFでも読み取り+翻訳を1回のAPI呼び出しで行います(ページ数・容量に応じて自動でバッチ分割)。
-`review_translation.py` は原文と翻訳文を比較し、誤訳・翻訳漏れ・数値不一致などをレポート(Markdown)として出力します。スキャン画像PDFは自動でvision転写してから比較します。
+`review_translation.py` は原文と翻訳文を比較し、誤訳・翻訳漏れ・数値不一致などをレポート(テキスト)として出力します。スキャン画像PDFは自動でvision転写してから比較します。
+
+使用モデルはいずれも Claude Sonnet 5.5(`claude-sonnet-5-5`)です。翻訳・転写は thinking なし、レビューは thinking ありで実行します。
 
 ## セットアップ
 
@@ -78,8 +80,8 @@ ANTHROPIC_API_KEY=sk-ant-...
    python review_translation.py
    ```
 
-3. 条番号・数値の不一致を検出する機械チェックと、Claude Opusによる誤訳・翻訳漏れ・用語不統一などのAIレビューを行い、`output/{実行日時}_{翻訳ファイル名}_review.txt` にレポートを出力します。
-   - コストを抑えたい場合はスクリプト内の `DEFAULT_MODEL` を `claude-sonnet-5` などに変更してください。
+3. 条番号・数値の不一致を検出する機械チェックと、Claude Sonnet 5.5による誤訳・翻訳漏れ・用語不統一などのAIレビューを行い、`output/{実行日時}_{翻訳ファイル名}_review.txt` にレポートを出力します。
+   - 重要な契約書はスクリプト内の `DEFAULT_MODEL` を `claude-opus-5-5` に変更してください(精度重視)。
 
 ## ディレクトリ構成
 
@@ -110,4 +112,5 @@ INPUT_FILE = "input/秘密保持契約書.pdf"
 ## 注意事項
 
 - OCR版(`translate_ocr_*.py`)は各ページを画像として処理するため、テキスト版よりAPIトークン消費(料金)が多くなります。
-- Anthropic APIの制約上、1リクエストあたり最大100ページ/32MBまでのため、OCR版は内部で自動バッチ分割しています。
+- Anthropic APIの制約上、1リクエストあたり最大600ページ/32MBまでのため、OCR版は内部で自動バッチ分割しています(5ページずつ処理)。
+- 翻訳スクリプトは Claude Sonnet 5.5 専用の設定(thinking なし)を使っています。`DEFAULT_MODEL` を変更する場合は、`thinking={"type": "between_tools"}` の行も削除してください。

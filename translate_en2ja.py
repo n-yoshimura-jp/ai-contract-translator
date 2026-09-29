@@ -48,7 +48,7 @@ OUTPUT_DIR = "output"         # 出力先ディレクトリのパス(無けれ�
 # ---------------------------------------------------------------------------
 # 内部設定
 # ---------------------------------------------------------------------------
-DEFAULT_MODEL = "claude-sonnet-5"
+DEFAULT_MODEL = "claude-sonnet-5-5"
 MAX_CHARS_PER_CHUNK = 8000   # 1回のAPI呼び出しで翻訳する最大文字数(英語)
 MAX_TOKENS_PER_CALL = 16384  # 日本語出力は英語よりトークン数が膨らむため多めに確保
 MAX_RETRIES = 3              # API失敗時のリトライ回数
@@ -81,7 +81,8 @@ heading, list item, table cell, footnote, caption, and label. Do NOT \
 summarize, paraphrase away detail, omit, or add anything. Omissions \
 (翻訳漏れ) are the most serious possible error and must never happen, even \
 for short or repetitive-looking segments.
-6. Output ONLY the translated text. No preamble, no commentary, no code fences.
+6. Output ONLY the translated text as plain text. No preamble, no commentary, \
+no code fences, no Markdown formatting (such as ** or #).
 7. If a segment starts or ends mid-sentence, translate it as-is without \
 completing the sentence yourself."""
 
@@ -292,9 +293,20 @@ def translate_chunk(client: anthropic.Anthropic, chunk: str, model: str) -> str:
                 model=model,
                 max_tokens=MAX_TOKENS_PER_CALL,
                 # 翻訳は推論より忠実さが重要。thinking を切って
-                # max_tokens を全て訳文に使う(切れによる翻訳漏れを防ぐ)
-                thinking={"type": "disabled"},
-                system=SYSTEM_PROMPT,
+                # max_tokens を全て訳文に使う(切れによる翻訳漏れを防ぐ)。
+                # Sonnet 5.5 では "disabled" は400エラーになるため
+                # "between_tools"(thinkingなし)を使う(effort は high 以下が必須)
+                # ("between_tools" は Sonnet 5.5 専用。モデルを変えたら削除する)
+                thinking={"type": "between_tools"},
+                # 実測(2026-09): high と medium で出力トークンにほぼ差がないため、
+                # 確実性を優先して high を使う(between_tools で使える上限)
+                output_config={"effort": "high"},
+                # システムプロンプトをキャッシュし、2チャンク目以降の入力料金を約1/10にする
+                system=[{
+                    "type": "text",
+                    "text": SYSTEM_PROMPT,
+                    "cache_control": {"type": "ephemeral"},
+                }],
                 messages=[{
                     "role": "user",
                     "content": (
@@ -303,6 +315,10 @@ def translate_chunk(client: anthropic.Anthropic, chunk: str, model: str) -> str:
                     ),
                 }],
             )
+            if response.stop_reason == "refusal":
+                # 拒否された場合は訳文が空になるため、黙って続行せず停止する
+                raise RuntimeError(
+                    f"モデルが翻訳を拒否しました: {response.stop_details}")
             if response.stop_reason == "max_tokens":
                 print("  [警告] 出力が max_tokens に達しました。"
                       "訳文が途中で切れている可能性があります"

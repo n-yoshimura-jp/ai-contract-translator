@@ -39,23 +39,23 @@ load_dotenv()
 # ★★★ 設定(ここを編集してください)★★★
 # ===========================================================================
 SOURCE_FILE     = "samples/sample_contract_ja.pdf"   # 原文ファイル
-TRANSLATED_FILE = "output/20260803_235042_sample_contract_ja_EN.pdf" # 翻訳後ファイル
+TRANSLATED_FILE = "output/20260929_221457_sample_contract_ja_EN.pdf" # 翻訳後ファイル
 OUTPUT_DIR      = "output"                           # レポートの出力先
 
-# レビューに使うモデル(重要な契約書は claude-opus-5 に切り替えてください)
-#   claude-sonnet-5 … 通常用。重大な誤訳・翻訳漏れ・数値誤り・無断追加は
-#                     十分に検出できる。料金は Opus の約 1/2.5、速度は同等
-#   claude-opus-5   … 重要契約の最終確認用。1語だけの訳し漏れなど軽微な
-#                     欠陥まで検出し、実行ごとの結果のブレも小さい
-DEFAULT_MODEL = "claude-sonnet-5"
+# レビューに使うモデル(重要な契約書は claude-opus-5-5 に切り替えてください)
+#   claude-sonnet-5-5 … 通常用。重大な誤訳・翻訳漏れ・数値誤り・無断追加は
+#                       十分に検出できる。料金は Opus の1/2
+#   claude-opus-5-5   … 重要契約の最終確認用。1語だけの訳し漏れなど軽微な
+#                       欠陥まで検出し、実行ごとの結果のブレも小さい
+DEFAULT_MODEL = "claude-sonnet-5-5"
 # ===========================================================================
 
 # ---------------------------------------------------------------------------
 # 内部設定
 # ---------------------------------------------------------------------------
-TRANSCRIBE_MODEL = "claude-sonnet-5"  # スキャンPDFの転写(OCR)用(コスト重視)
+TRANSCRIBE_MODEL = "claude-sonnet-5-5"  # スキャンPDFの転写(OCR)用(コスト重視)
 TRANSCRIBE_PAGES_PER_BATCH = 10     # 転写時に1回で処理するページ数
-MAX_TOKENS_PER_CALL = 32000  # Opus 5はデフォルトでthinkingが有効になり同じ予算を消費するため増量
+MAX_TOKENS_PER_CALL = 32000  # レビューはthinkingが有効で同じ予算を消費するため増量
 MAX_RETRIES = 3
 MAX_TOTAL_CHARS = 150_000  # 原文+翻訳文の合計がこれを超える場合は警告
 
@@ -247,6 +247,10 @@ def transcribe_scanned_pdf(path: Path, client: anthropic.Anthropic) -> str:
                 with client.messages.stream(
                     model=TRANSCRIBE_MODEL,
                     max_tokens=MAX_TOKENS_PER_CALL,
+                    # 転写に thinking は不要(トークン節約)。
+                    # "between_tools" は Sonnet 5.5 専用のため、モデルを変えたら削除する
+                    thinking={"type": "between_tools"},
+                    output_config={"effort": "high"},
                     messages=[{
                         "role": "user",
                         "content": [
@@ -259,7 +263,11 @@ def transcribe_scanned_pdf(path: Path, client: anthropic.Anthropic) -> str:
                     }],
                 ) as stream:
                     text = stream.get_final_text()
-                    if stream.get_final_message().stop_reason == "max_tokens":
+                    final = stream.get_final_message()
+                    if final.stop_reason == "refusal":
+                        raise RuntimeError(
+                            f"モデルが転写を拒否しました: {final.stop_details}")
+                    if final.stop_reason == "max_tokens":
                         print("  [警告] 転写が max_tokens に達しました。"
                               "途中で切れている可能性があります"
                               "(TRANSCRIBE_PAGES_PER_BATCH を小さくしてください)。")
@@ -309,8 +317,9 @@ MONTHS = {
 def extract_numbers(text: str) -> Counter:
     """比較用に数値を正規化して抽出する(全角→半角、月名→数字、カンマ除去)。"""
     t = text.translate(str.maketrans("0123456789", "0123456789"))
+    # 月名は直後に数字が続く場合のみ変換する(助動詞 "may" などの誤変換防止)
     for name, num in MONTHS.items():
-        t = re.sub(name, f" {num} ", t, flags=re.IGNORECASE)
+        t = re.sub(rf"\b{name}\b(?=\s*\d)", f" {num} ", t, flags=re.IGNORECASE)
     t = re.sub(r"(?<=\d),(?=\d)", "", t)  # 300,000 → 300000
     return Counter(re.findall(r"\d+", t))
 
@@ -405,11 +414,21 @@ def ai_review(source: str, translation: str, model: str,
             with client.messages.stream(
                 model=model,
                 max_tokens=MAX_TOKENS_PER_CALL,
+                # レビューは判断が必要なため thinking(adaptive)を使う。
+                # effort は high 必須。実測(2026-09、誤り8件を仕込んだ訳文)で
+                # high は全件検出・誤検出0、medium は重要な漏れを「軽微」に
+                # 格下げし誤検出も出た(Opus 5.5 は既定が medium なので明示が必要)
+                thinking={"type": "adaptive"},
+                output_config={"effort": "high"},
                 system=SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": user_text}],
             ) as stream:
                 text = stream.get_final_text()
-                if stream.get_final_message().stop_reason == "max_tokens":
+                final = stream.get_final_message()
+                if final.stop_reason == "refusal":
+                    raise RuntimeError(
+                        f"モデルがレビューを拒否しました: {final.stop_details}")
+                if final.stop_reason == "max_tokens":
                     print("  [警告] レビュー結果が max_tokens に達しました。"
                           "指摘が途中で切れ、JSON解析に失敗する可能性があります"
                           "(文書を分割してレビューしてください)。")
